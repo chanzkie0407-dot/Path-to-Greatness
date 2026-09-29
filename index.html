@@ -35,7 +35,8 @@
             transition: all 0.3s;
             text-align: left;
         }
-        .option-btn:hover { border-color: #FF9800; background: #FFF8E1; }
+        .option-btn:hover:not(:disabled) { border-color: #FF9800; background: #FFF8E1; }
+        .option-btn:disabled { cursor: not-allowed; opacity: 0.8; }
         .option-btn.correct { border-color: #4CAF50; background: #E8F5E9; }
         .option-btn.wrong { border-color: #f44336; background: #FFEBEE; }
         
@@ -56,14 +57,20 @@
             font-size: 16px; cursor: pointer; margin: 5px;
         }
         .menu-btn:hover { background: #FB8C00; }
+        .back-btn {
+            background: #eee; color: #333; border: none;
+            padding: 10px 18px; border-radius: 8px;
+            cursor: pointer; margin-bottom: 15px;
+        }
+        .back-btn:hover { background: #ddd; }
+        .completion { text-align: center; padding: 20px; }
     </style>
 </head>
 <body>
-
 <div class="container">
     <!-- Status Bar -->
     <div class="status-bar" id="statusBar">
-        ⭐ <span id="starCount">0</span> | <span id="connStatus">🔌 Offline</span>
+        ⭐ <span id="starCount">0</span> | <span id="connStatus">🔌 Checking…</span>
     </div>
 
     <!-- Main Menu -->
@@ -80,16 +87,16 @@
         <button class="menu-btn" onclick="startGame('math')">📐 Bilang at Pera</button>
         <p class="english">Math & Money</p>
         
-        <button class="menu-btn" onclick="startGame('health')">🏥 Kalusugan</button>
-        <p class="english">Health</p>
+        <button class="menu-btn" onclick="startGame('physical')">🏥 Kalusugan</button>
+        <p class="english">Health & Safety</p>
         
         <button class="menu-btn" onclick="startGame('character')">💎 Pag-uugali</button>
         <p class="english">Character</p>
     </div>
 
-    <!-- Question Area (Hidden Initially) -->
+    <!-- Game Area -->
     <div id="gameArea" style="display: none;">
-        <button onclick="goBack()" style="margin-bottom: 15px;">← Bumalik | Back</button>
+        <button class="back-btn" onclick="goBack()">← Bumalik | Back</button>
         
         <div class="question-card">
             <p class="tagalog" id="questionTL"></p>
@@ -109,1257 +116,453 @@
 </div>
 
 <script>
-// ========== SOUND SYSTEM ==========
+// ========== SOUND SYSTEM — FIXED & CONSISTENT ==========
 const AudioContext = window.AudioContext || window.webkitAudioContext;
-const audioCtx = new AudioContext();
+let audioCtx = null;
+
+function initAudio() {
+    if (!audioCtx) {
+        audioCtx = new AudioContext();
+    }
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
+}
 
 function playCorrectSound() {
+    initAudio();
+    if (!audioCtx) return;
+    
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-    osc.connect(gain); gain.connect(audioCtx.destination);
-    osc.frequency.setValueAtTime(523, audioCtx.currentTime); // C5
-    osc.frequency.setValueAtTime(659, audioCtx.currentTime + 0.1); // E5
-    osc.frequency.setValueAtTime(784, audioCtx.currentTime + 0.2); // G5
-    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(523.25, audioCtx.currentTime);   // C5
+    osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1); // E5
+    osc.frequency.setValueAtTime(783.99, audioCtx.currentTime + 0.2); // G5
+    
+    gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+    
     osc.start(audioCtx.currentTime);
     osc.stop(audioCtx.currentTime + 0.4);
 }
 
 function playWrongSound() {
+    initAudio();
+    if (!audioCtx) return;
+    
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
-    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(320, audioCtx.currentTime);
-    osc.frequency.setValueAtTime(280, audioCtx.currentTime + 0.2);
-    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
+    osc.frequency.setValueAtTime(311.13, audioCtx.currentTime);    // Eb4
+    osc.frequency.setValueAtTime(261.63, audioCtx.currentTime + 0.15); // C4
+    osc.frequency.setValueAtTime(220.00, audioCtx.currentTime + 0.3);  // A3
+    
+    gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+    
     osc.start(audioCtx.currentTime);
-    osc.stop(audioCtx.currentTime + 0.35);
+    osc.stop(audioCtx.currentTime + 0.5);
 }
 
-// ========== QUESTION DATABASE ==========
+// ========== QUESTION DATABASE — ALL 5 CATEGORIES COMPLETE ==========
 const questionSets = {
     science: [
-  { type: 'choice',
-    tl: 'Ano ang nagbibigay sa atin ng liwanag at init?',
-    en: 'What gives us light and warmth?',
-    options: [
-      { tl: 'Araw', en: 'Sun', correct: true },
-      { tl: 'Buwan', en: 'Moon' },
-      { tl: 'Bituin', en: 'Star' },
-      { tl: 'Ulap', en: 'Cloud' }
+        {
+            type: 'choice',
+            tl: 'Ano ang nagbibigay sa atin ng liwanag at init?',
+            en: 'What gives us light and warmth?',
+            options: [
+                { tl: 'Araw', en: 'Sun', correct: true },
+                { tl: 'Buwan', en: 'Moon' },
+                { tl: 'Bituin', en: 'Star' },
+                { tl: 'Ulap', en: 'Cloud' }
+            ],
+            feedbackCorrectTL: 'Tumpak! Ang Araw ang pinagmumulan ng liwanag at enerhiya.',
+            feedbackCorrectEN: 'Perfect! The Sun is our source of light and energy.',
+            feedbackWrongTL: 'Subukan uli. Ang Araw ang nagbibigay ng liwanag at init sa atin.',
+            feedbackWrongEN: 'Try again. The Sun gives us light and warmth.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang kailangan ng halaman upang lumago?',
+            en: 'What do plants need to grow?',
+            options: [
+                { tl: 'Tubig, liwanag, at lupa', en: 'Water, light, and soil', correct: true },
+                { tl: 'Bato at hangin', en: 'Stones and air' },
+                { tl: 'Lupa at apoy', en: 'Soil and fire' },
+                { tl: 'Tubig at bato', en: 'Water and stone' }
+            ],
+            feedbackCorrectTL: 'Mahusay! Ang halaman ay nabubuhay sa tamang pag-aalaga.',
+            feedbackCorrectEN: 'Great! Plants grow with proper care.',
+            feedbackWrongTL: 'Hindi. Ang tubig, araw, at mabuting lupa ang kailangan ng halaman.',
+            feedbackWrongEN: 'Not quite. Plants need water, sunlight, and good soil.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang pinakamalaking anyong tubig?',
+            en: 'What is the largest body of water?',
+            options: [
+                { tl: 'Karagatan', en: 'Ocean', correct: true },
+                { tl: 'Ilog', en: 'River' },
+                { tl: 'Lawa', en: 'Lake' },
+                { tl: 'Bukal', en: 'Spring' }
+            ],
+            feedbackCorrectTL: 'Tama! Ang karagatan ay sumasakop sa malaking bahagi ng mundo.',
+            feedbackCorrectEN: 'Correct! Oceans cover most of the Earth.',
+            feedbackWrongTL: 'Hindi. Ang karagatan ang pinakamalawak at pinakamalalim.',
+            feedbackWrongEN: 'Not quite. Oceans are the widest and deepest.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang nagbibigay ng hininga sa atin?',
+            en: 'What gives us air to breathe?',
+            options: [
+                { tl: 'Halaman at puno', en: 'Plants and trees', correct: true },
+                { tl: 'Kotse', en: 'Cars' },
+                { tl: 'Gusali', en: 'Buildings' },
+                { tl: 'Bato', en: 'Stones' }
+            ],
+            feedbackCorrectTL: 'Mahusay! Ang bawat puno ay kaibigan ng tao.',
+            feedbackCorrectEN: 'Excellent! Every tree is a friend to people.',
+            feedbackWrongTL: 'Hindi. Ang halaman ay naglilinis ng hangin at nagbibigay ng oksiheno.',
+            feedbackWrongEN: 'Not quite. Plants clean air and give oxygen.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang dapat gawin upang mapangalagaan ang kalikasan?',
+            en: 'What should we do to protect nature?',
+            options: [
+                { tl: 'Magtanim ng puno at huwag magtapon ng basura', en: 'Plant trees and do not litter', correct: true },
+                { tl: 'Pumutol ng puno', en: 'Cut down trees' },
+                { tl: 'Magtapon ng basura sa ilog', en: 'Throw trash in rivers' },
+                { tl: 'Sunugin ang basura', en: 'Burn trash' }
+            ],
+            feedbackCorrectTL: 'Napakahusay! Ang pag-aalaga sa kalikasan ay pag-aalaga sa sarili.',
+            feedbackCorrectEN: 'Excellent! Caring for nature is caring for ourselves.',
+            feedbackWrongTL: 'Hindi. Ang bawat puno at malinis na ilog ay yaman ng lahat.',
+            feedbackWrongEN: 'Not quite. Every tree and clean river is everyone\'s treasure.'
+        }
     ],
-    feedbackCorrectTL: 'Tumpak! Ang Araw ang pinagmumulan ng liwanag.',
-    feedbackCorrectEN: 'Perfect! The Sun is our source of light.',
-    feedbackWrongTL: 'Subukan uli. Ang Araw ang pinagmumulan ng enerhiya.',
-    feedbackWrongEN: 'Try again. The Sun is our source of energy.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang kailangan ng halaman upang lumago?',
-    en: 'What do plants need to grow?',
-    options: [
-      { tl: 'Tubig, liwanag, at lupa', en: 'Water, light, and soil', correct: true },
-      { tl: 'Bato at hangin', en: 'Stones and air' },
-      { tl: 'Lupa at apoy', en: 'Soil and fire' },
-      { tl: 'Tubig at bato', en: 'Water and stone' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang halaman ay nabubuhay sa tamang pag-aalaga.',
-    feedbackCorrectEN: 'Great! Plants live with proper care.',
-    feedbackWrongTL: 'Hindi. Ang tubig at araw ay kailangan ng bawat halaman.',
-    feedbackWrongEN: 'Not quite. Every plant needs water and sunlight.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang pinakamalaking anyong tubig?',
-    en: 'What is the largest body of water?',
-    options: [
-      { tl: 'Karagatan', en: 'Ocean', correct: true },
-      { tl: 'Ilog', en: 'River' },
-      { tl: 'Lawa', en: 'Lake' },
-      { tl: 'Bukal', en: 'Spring' }
-    ],
-    feedbackCorrectTL: 'Tama! Ang karagatan ay sumasakop sa malaking bahagi ng mundo.',
-    feedbackCorrectEN: 'Correct! Oceans cover most of the Earth.',
-    feedbackWrongTL: 'Hindi. Ang karagatan ang pinakamalawak at malalim.',
-    feedbackWrongEN: 'Not quite. Oceans are the widest and deepest.'
-  },
-  { type: 'choice',
-    tl: 'Saan pumupunta ang ulan pagkatapos bumagsak sa lupa?',
-    en: 'Where does rain go after falling on land?',
-    options: [
-      { tl: 'Sa ilog, lawa, at karagatan', en: 'To rivers, lakes, and oceans', correct: true },
-      { tl: 'Sa kalawakan', en: 'To space' },
-      { tl: 'Nawawala agad', en: 'Disappears immediately' },
-      { tl: 'Sa ilalim ng lupa lang', en: 'Only underground' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang tubig ay umiikot sa kalikasan — walang katapusan.',
-    feedbackCorrectEN: 'Perfect! Water cycles endlessly in nature.',
-    feedbackWrongTL: 'Subukan uli. Ang tubig ay dumadaloy pabalik sa dagat.',
-    feedbackWrongEN: 'Try again. Water flows back to the sea.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang nagbibigay ng hininga sa atin?',
-    en: 'What gives us air to breathe?',
-    options: [
-      { tl: 'Halaman at puno', en: 'Plants and trees', correct: true },
-      { tl: 'Kotse', en: 'Cars' },
-      { tl: 'Gusali', en: 'Buildings' },
-      { tl: 'Bato', en: 'Stones' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang bawat puno ay kaibigan ng tao.',
-    feedbackCorrectEN: 'Excellent! Every tree is a friend to people.',
-    feedbackWrongTL: 'Hindi. Ang halaman ay naglilinis ng hangin at nagbibigay ng oksiheno.',
-    feedbackWrongEN: 'Not quite. Plants clean air and give oxygen.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang nangyayari kapag pinaghalo ang pula at asul na kulay?',
-    en: 'What color do you get when mixing red and blue?',
-    options: [
-      { tl: 'Lila', en: 'Purple', correct: true },
-      { tl: 'Berde', en: 'Green' },
-      { tl: 'Dilaw', en: 'Yellow' },
-      { tl: 'Itim', en: 'Black' }
-    ],
-    feedbackCorrectTL: 'Tama! Ang mga kulay ay nagbabago kapag pinagsama.',
-    feedbackCorrectEN: 'Correct! Colors change when combined.',
-    feedbackWrongTL: 'Subukan uli. Pula + Asul = Lila.',
-    feedbackWrongEN: 'Try again. Red + Blue = Purple.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang sentro ng ating Sistemang Solar?',
-    en: 'What is the center of our Solar System?',
-    options: [
-      { tl: 'Araw', en: 'Sun', correct: true },
-      { tl: 'Mundo', en: 'Earth' },
-      { tl: 'Buwan', en: 'Moon' },
-      { tl: 'Bituin', en: 'Star' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang Araw ang nagpapanatili sa lahat ng planeta sa kanyang daanan.',
-    feedbackCorrectEN: 'Perfect! The Sun keeps all planets in their paths.',
-    feedbackWrongTL: 'Hindi. Ang Araw ang sentro ng ating kalawakan.',
-    feedbackWrongEN: 'Not quite. The Sun is the center of our solar system.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang tawag sa pag-ikot ng Mundo sa sarili nito?',
-    en: 'What is Earth spinning on its axis called?',
-    options: [
-      { tl: 'Pag-ikot', en: 'Rotation', correct: true },
-      { tl: 'Paglilipat', en: 'Travel' },
-      { tl: 'Pagtalon', en: 'Jumping' },
-      { tl: 'Pag-ikot sa Araw', en: 'Orbiting the Sun' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ito ang dahilan kung bakit may araw at gabi.',
-    feedbackCorrectEN: 'Great! This causes day and night.',
-    feedbackWrongTL: 'Hindi. Ang pag-ikot ay nagdudulot ng araw at gabi.',
-    feedbackWrongEN: 'Not quite. Rotation causes day and night.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang nangyayari kapag mainit ang tubig?',
-    en: 'What happens when water is heated?',
-    options: [
-      { tl: 'Nagiging singaw', en: 'Becomes steam', correct: true },
-      { tl: 'Nagiging yelo', en: 'Becomes ice' },
-      { tl: 'Nawawala agad', en: 'Disappears instantly' },
-      { tl: 'Nagiging tubig-alat', en: 'Becomes saltwater' }
-    ],
-    feedbackCorrectTL: 'Tama! Ang init ay nagpapabago sa anyo ng tubig.',
-    feedbackCorrectEN: 'Correct! Heat changes the form of water.',
-    feedbackWrongTL: 'Subukan uli. Ang mainit na tubig ay nagiging singaw.',
-    feedbackWrongEN: 'Try again. Hot water turns into steam.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang dapat gawin upang mapangalagaan ang kalikasan?',
-    en: 'What should we do to protect nature?',
-    options: [
-      { tl: 'Magtanim ng puno at huwag magtapon ng basura', en: 'Plant trees and do not litter', correct: true },
-      { tl: 'Pumutol ng puno', en: 'Cut down trees' },
-      { tl: 'Magtapon ng basura sa ilog', en: 'Throw trash in rivers' },
-      { tl: 'Sunugin ang basura', en: 'Burn trash' }
-    ],
-    feedbackCorrectTL: 'Napakahusay! Ang pag-aalaga sa kalikasan ay pag-aalaga sa sarili.',
-    feedbackCorrectEN: 'Excellent! Caring for nature is caring for ourselves.',
-    feedbackWrongTL: 'Hindi. Ang bawat puno at malinis na ilog ay yaman ng lahat.',
-    feedbackWrongEN: 'Not quite. Every tree and clean river is everyone\'s treasure.'
-  },
-  { type: 'decision',
-    tl: 'Nakakita ka ng pumutol ng puno sa gubat. Ano ang gagawin mo?',
-    en: 'You see someone cutting trees in the forest. What do you do?',
-    options: [
-      { tl: 'Ipaalam sa kinauukulan nang mahinahon', en: 'Inform authorities calmly', best: true },
-      { tl: 'Sigawan sila', en: 'Shout at them' },
-      { tl: 'Huwag pansinin', en: 'Ignore it' },
-      { tl: 'Tulungan sila', en: 'Help them' }
-    ],
-    feedbackTL: 'Ang kalikasan ay dapat ingatan — ipaalam sa mga may pananagutan upang maayos nang tama.',
-    feedbackEN: 'Nature must be protected — inform those responsible to fix it properly.'
-  },
-  { type: 'decision',
-    tl: 'May basura sa paligid — saan ito ilalagay mo?',
-    en: 'There is trash around — where do you put it?',
-    options: [
-      { tl: 'Sa tamang lalagyan ng basura', en: 'In the proper trash bin', best: true },
-      { tl: 'Itatapon sa daan', en: 'Throw on the road' },
-      { tl: 'Itatapon sa ilog', en: 'Throw in the river' },
-      { tl: 'Iiwan lang', en: 'Leave it there' }
-    ],
-    feedbackTL: 'Ang kalinisan ay nagsisimula sa sarili. Ang maayos na pagtatapon ay nag-iingat sa kalikasan.',
-    feedbackEN: 'Cleanliness starts with yourself. Proper disposal protects nature.'
-  },
-  { type: 'matching',
-    tl: 'Itugma ang Anyong Lupa at Anyong Tubig',
-    en: 'Match Landform and Water Form',
-    pairs: [
-      { a: 'Bundok', b: 'Mataas na anyong lupa' },
-      { a: 'Ilog', b: 'Tubig na dumadaloy patungong dagat' },
-      { a: 'Lambak', b: 'Patag na lupa sa pagitan ng bundok' },
-      { a: 'Dagat', b: 'Malawak na tubig-alat' }
-    ]
-  },
-  { type: 'sequence',
-    tl: 'Ayusin ang paglago ng halaman',
-    en: 'Arrange plant growth stages',
-    items: [
-      { order: 1, tl: 'Buto sa lupa', en: 'Seed in soil' },
-      { order: 2, tl: 'Umusbong ang usbong', en: 'Sprout appears' },
-      { order: 3, tl: 'Lumaki ang tangkay at dahon', en: 'Stem and leaves grow' },
-      { order: 4, tl: 'Namunga o namulaklak', en: 'Bears fruit or flowers' }
-    ]
-  },
-  { type: 'truefalse',
-    tl: 'Ang hangin ay hindi nakikita kaya wala itong lakas.',
-    en: 'Wind cannot be seen so it has no power.',
-    answer: false,
-    feedbackTL: 'MALI! Ang hangin ay may lakas — nakakapagpaandar ito ng bangka at gilingan.',
-    feedbackEN: 'FALSE! Wind has power — it can move boats and windmills.'
-  },
-  { type: 'truefalse',
-    tl: 'Ang Mundo ay umiikot sa Araw.',
-    en: 'The Earth goes around the Sun.',
-    answer: true,
-    feedbackTL: 'TAMA! Ito ang dahilan kung bakit nagbabago ang panahon.',
-    feedbackEN: 'TRUE! This is why seasons change.'
-  },
-  { type: 'puzzle',
-    tl: 'Buuin ang salita: P-U-N-O',
-    en: 'Arrange the letters: P-U-N-O',
-    answerTL: 'PUNO',
-    answerEN: 'TREE',
-    hintTL: 'Ito ay nagbibigay lilim, prutas, at malinis na hangin.',
-    hintEN: 'It gives shade, fruit, and clean air.'
-  },
-  { type: 'puzzle',
-    tl: 'Buuin ang salita: K-A-L-I-K-A-S-A-N',
-    en: 'Arrange the letters: K-A-L-I-K-A-S-A-N',
-    answerTL: 'KALIKASAN',
-    answerEN: 'NATURE',
-    hintTL: 'Ito ang ating kapaligiran — lupa, tubig, halaman, at hayop.',
-    hintEN: 'Our surroundings — land, water, plants, and animals.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang sanhi ng pagbabago ng panahon?',
-    en: 'What causes weather changes?',
-    options: [
-      { tl: 'Init ng Araw at galaw ng hangin', en: 'Sun\'s heat and wind movement', correct: true },
-      { tl: 'Paggalaw ng mga tao', en: 'People moving around' },
-      { tl: 'Paglipad ng ibon', en: 'Birds flying' },
-      { tl: 'Wala sa nabanggit', en: 'None of the above' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang Araw ang nagtutulak sa lahat ng pagbabago sa panahon.',
-    feedbackCorrectEN: 'Perfect! The Sun drives all weather changes.',
-    feedbackWrongTL: 'Subukan uli. Ang init at hangin ang nagpapabago sa panahon.',
-    feedbackWrongEN: 'Try again. Heat and wind change the weather.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang pinakamahalagang gas na hinihinga natin?',
-    en: 'What is the most important gas we breathe?',
-    options: [
-      { tl: 'Oksiheno', en: 'Oxygen', correct: true },
-      { tl: 'Nitroheno', en: 'Nitrogen' },
-      { tl: 'Helyo', en: 'Helium' },
-      { tl: 'Carbon Dioxide', en: 'Carbon Dioxide' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang oksiheno ay kailangan ng bawat bahagi ng ating katawan.',
-    feedbackCorrectEN: 'Excellent! Every part of our body needs oxygen.',
-    feedbackWrongTL: 'Hindi. Ang oksiheno ang hinihinga natin upang mabuhay.',
-    feedbackWrongEN: 'Not quite. We breathe oxygen to live.'
-  }
-],
+
     law: [
-  { type: 'choice',
-    tl: 'Sino ang dapat sundin sa pagtawid sa kalsada?',
-    en: 'Who should you follow when crossing the street?',
-    options: [
-      { tl: 'Kaklase', en: 'Classmate' },
-      { tl: 'Pulis o Tagapamahala', en: 'Police or Traffic Officer', correct: true },
-      { tl: 'Kahit sino', en: 'Anyone' },
-      { tl: 'Walang susundin', en: 'No one' }
+        {
+            type: 'choice',
+            tl: 'Sino ang dapat sundin sa pagtawid sa kalsada?',
+            en: 'Who should you follow when crossing the street?',
+            options: [
+                { tl: 'Pulis o Tagapamahala', en: 'Police or Traffic Officer', correct: true },
+                { tl: 'Kaklase', en: 'Classmate' },
+                { tl: 'Kahit sino', en: 'Anyone' },
+                { tl: 'Walang susundin', en: 'No one' }
+            ],
+            feedbackCorrectTL: 'Mahusay! Ang batas ay para sa ating kaligtasan.',
+            feedbackCorrectEN: 'Great! Laws are made for our safety.',
+            feedbackWrongTL: 'Hindi. Ang pulis ang nagtuturo sa atin ng tamang daan.',
+            feedbackWrongEN: 'Not quite. Police officers guide us to safety.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang dapat gawin sa nakitang gamit na hindi sa iyo?',
+            en: 'What should you do with something found that is not yours?',
+            options: [
+                { tl: 'Ibigay sa guro o kinauukulan', en: 'Give to teacher or authority', correct: true },
+                { tl: 'Itago agad', en: 'Keep it immediately' },
+                { tl: 'Ipamigay sa iba', en: 'Give to others' },
+                { tl: 'Iwanan kung saan nakita', en: 'Leave it where found' }
+            ],
+            feedbackCorrectTL: 'Tama! Ang katapatan ay mahalagang pag-uugali.',
+            feedbackCorrectEN: 'Correct! Honesty is an important value.',
+            feedbackWrongTL: 'Isipin mo: kung ikaw ang nawalan, gusto mo bang maibalik?',
+            feedbackWrongEN: 'Think: If you lost something, would you want it returned?'
+        },
+        {
+            type: 'choice',
+            tl: 'Alin ang karapatan ng bawat bata?',
+            en: 'Which is a right of every child?',
+            options: [
+                { tl: 'Makapag-aral', en: 'To have an education', correct: true },
+                { tl: 'Magtrabaho agad', en: 'To work immediately' },
+                { tl: 'Umuwi nang hatinggabi', en: 'To go home at midnight' },
+                { tl: 'Laging maglaro', en: 'To always play' }
+            ],
+            feedbackCorrectTL: 'Tumpak! Ang edukasyon ay karapatan at tungkulin.',
+            feedbackCorrectEN: 'Perfect! Education is both a right and a duty.',
+            feedbackWrongTL: 'Subukan uli. Ang pag-aaral ay para sa kinabukasan.',
+            feedbackWrongEN: 'Try again. Education is for your future.'
+        },
+        {
+            type: 'choice',
+            tl: 'Sino ang dapat sumunod sa batas?',
+            en: 'Who must follow the law?',
+            options: [
+                { tl: 'Lahat ng tao', en: 'Everyone', correct: true },
+                { tl: 'Mayayaman lang', en: 'Only the rich' },
+                { tl: 'Mga bata lang', en: 'Only children' },
+                { tl: 'Mga opisyal lang', en: 'Only officials' }
+            ],
+            feedbackCorrectTL: 'Tama! Ang batas ay para sa lahat — pantay-pantay tayo.',
+            feedbackCorrectEN: 'Correct! The law applies to everyone — we are equal.',
+            feedbackWrongTL: 'Hindi. Bata man o matanda, dapat sumunod sa batas.',
+            feedbackWrongEN: 'Not quite. Young or old, everyone must follow the law.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang dapat gawin upang maging mabuting mamamayan?',
+            en: 'What makes a good citizen?',
+            options: [
+                { tl: 'Sumunod sa batas at tumulong', en: 'Follow laws and help others', correct: true },
+                { tl: 'Sarili lang ang isipin', en: 'Think only of yourself' },
+                { tl: 'Laging lumalabag sa batas', en: 'Always break rules' },
+                { tl: 'Wala sa nabanggit', en: 'None of the above' }
+            ],
+            feedbackCorrectTL: 'Napakahusay! Ang pagtulong at pagsunod ay nagpapabuti sa ating bayan.',
+            feedbackCorrectEN: 'Excellent! Helping and obeying make our nation better.',
+            feedbackWrongTL: 'Subukan uli. Ang pagtulong sa kapwa ay pagpapala sa sarili rin.',
+            feedbackWrongEN: 'Try again. Helping others blesses you too.'
+        }
     ],
-    feedbackCorrectTL: 'Mahusay! Ang batas ay para sa ating kaligtasan.',
-    feedbackCorrectEN: 'Great! Laws are made for our safety.',
-    feedbackWrongTL: 'Hindi. Ang pulis ang nagtuturo sa atin ng tamang daan.',
-    feedbackWrongEN: 'Not quite. Police officers guide us to safety.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang dapat gawin sa nakitang gamit na hindi sa iyo?',
-    en: 'What should you do with something found that is not yours?',
-    options: [
-      { tl: 'Itago agad', en: 'Keep it immediately' },
-      { tl: 'Ibigay sa guro o kinauukulan', en: 'Give to teacher or authority', correct: true },
-      { tl: 'Ipamigay sa iba', en: 'Give to others' },
-      { tl: 'Iwanan kung saan nakita', en: 'Leave it where found' }
+
+    math: [
+        {
+            type: 'choice',
+            tl: 'May ₱50 ka, bumili ka ng tinapay na ₱20. Magkano ang natitira?',
+            en: 'You have ₱50, bought bread for ₱20. How much is left?',
+            options: [
+                { tl: '₱30', en: '₱30', correct: true },
+                { tl: '₱20', en: '₱20' },
+                { tl: '₱40', en: '₱40' },
+                { tl: '₱70', en: '₱70' }
+            ],
+            feedbackCorrectTL: 'Tumpak! 50 − 20 = 30. Mahusay magbilang!',
+            feedbackCorrectEN: 'Perfect! 50 − 20 = 30. Great counting!',
+            feedbackWrongTL: 'Hindi. 50 minus 20 ay 30 lang.',
+            feedbackWrongEN: 'Not quite. 50 minus 20 equals 30.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang ibig sabihin ng pag-iipon?',
+            en: 'What does saving money mean?',
+            options: [
+                { tl: 'Itabi ang bahagi ng pera para sa kinabukasan', en: 'Set aside money for the future', correct: true },
+                { tl: 'Gastusin agad ang lahat', en: 'Spend everything immediately' },
+                { tl: 'Ipamigay sa lahat', en: 'Give it all away' },
+                { tl: 'Itago at huwag gamitin kailanman', en: 'Hide and never use it' }
+            ],
+            feedbackCorrectTL: 'Tama! Ang pag-iipon ay paghahanda sa oras ng pangangailangan.',
+            feedbackCorrectEN: 'Correct! Saving prepares you for times of need.',
+            feedbackWrongTL: 'Subukan uli. Ang pag-iipon ay pagtutulungan sa sariling kinabukasan.',
+            feedbackWrongEN: 'Try again. Saving is helping your own future.'
+        },
+        {
+            type: 'choice',
+            tl: 'May tatlong kaibigan, binigyan mo sila ng tig-2 na kendi. Ilan lahat ang ibinigay mo?',
+            en: 'You have 3 friends, gave each 2 candies. How many total?',
+            options: [
+                { tl: '6', en: '6', correct: true },
+                { tl: '5', en: '5' },
+                { tl: '3', en: '3' },
+                { tl: '2', en: '2' }
+            ],
+            feedbackCorrectTL: 'Tumpak! 3 × 2 = 6. Napakagandang magbahagi!',
+            feedbackCorrectEN: 'Perfect! 3 × 2 = 6. Sharing is wonderful!',
+            feedbackWrongTL: 'Subukan uli. Bilangin: 2, 4, 6.',
+            feedbackWrongEN: 'Try again. Count: 2, 4, 6.'
+        },
+        {
+            type: 'choice',
+            tl: 'Kung ₱10 ang halaga ng isang lapis, magkano ang 5 lapis?',
+            en: 'If 1 pencil costs ₱10, how much for 5 pencils?',
+            options: [
+                { tl: '₱50', en: '₱50', correct: true },
+                { tl: '₱15', en: '₱15' },
+                { tl: '₱40', en: '₱40' },
+                { tl: '₱5', en: '₱5' }
+            ],
+            feedbackCorrectTL: 'Tumpak! 10 × 5 = 50. Magaling sa pagpaparami!',
+            feedbackCorrectEN: 'Perfect! 10 × 5 = 50. Great multiplication!',
+            feedbackWrongTL: 'Subukan uli. Tig-10 bawat isa — 10, 20, 30, 40, 50.',
+            feedbackWrongEN: 'Try again. 10 each — count up: 10, 20, 30, 40, 50.'
+        },
+        {
+            type: 'choice',
+            tl: 'Alin ang mas mahalaga — Pangangailangan o Kagustuhan?',
+            en: 'Which is more important — Needs or Wants?',
+            options: [
+                { tl: 'Pangangailangan muna bago ang kagustuhan', en: 'Needs come before wants', correct: true },
+                { tl: 'Kagustuhan muna bago ang pangangailangan', en: 'Wants come before needs' },
+                { tl: 'Pantay ang halaga nila', en: 'They have equal value' },
+                { tl: 'Wala sa nabanggit', en: 'None of the above' }
+            ],
+            feedbackCorrectTL: 'Mahusay! Pagkain, tirahan, at gamot ang uunahin bago ang laruan.',
+            feedbackCorrectEN: 'Great! Food, shelter, and medicine come before toys.',
+            feedbackWrongTL: 'Hindi. Ang pangangailangan ang hindi pwedeng mawala.',
+            feedbackWrongEN: 'Not quite. Needs are what we cannot live without.'
+        }
     ],
-    feedbackCorrectTL: 'Tama! Ang katapatan ay mahalagang pag-uugali.',
-    feedbackCorrectEN: 'Correct! Honesty is an important value.',
-    feedbackWrongTL: 'Isipin mo: kung ikaw ang nawalan, gusto mo bang maibalik?',
-    feedbackWrongEN: 'Think: If you lost something, would you want it returned?'
-  },
-  { type: 'choice',
-    tl: 'Alin ang karapatan ng bawat bata?',
-    en: 'Which is a right of every child?',
-    options: [
-      { tl: 'Makapag-aral', en: 'To have an education', correct: true },
-      { tl: 'Magtrabaho agad', en: 'To work immediately' },
-      { tl: 'Umuwi nang hatinggabi', en: 'To go home at midnight' },
-      { tl: 'Laging maglaro', en: 'To always play' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang edukasyon ay karapatan at tungkulin.',
-    feedbackCorrectEN: 'Perfect! Education is both a right and a duty.',
-    feedbackWrongTL: 'Subukan uli. Ang pag-aaral ay para sa kinabukasan.',
-    feedbackWrongEN: 'Try again. Education is for your future.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang ibig sabihin ng pagsunod sa batas?',
-    en: 'What does following the law mean?',
-    options: [
-      { tl: 'Gagawin ang gusto', en: 'Do whatever you want' },
-      { tl: 'Sundin ang alituntunin para sa lahat', en: 'Follow rules for everyone', correct: true },
-      { tl: 'Sumunod kapag may nakatingin', en: 'Follow only when watched' },
-      { tl: 'Piliin lang ang gusto', en: 'Choose only what you like' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang batas ay nagbibigay kaayusan.',
-    feedbackCorrectEN: 'Excellent! Laws bring order to society.',
-    feedbackWrongTL: 'Hindi. Ang batas ay sinusunod kahit walang nakatingin.',
-    feedbackWrongEN: 'Not quite. Laws are followed even when no one is watching.'
-  },
-  { type: 'choice',
-    tl: 'Sino ang pinakamataas na pinuno ng ating bansa?',
-    en: 'Who is the highest leader of our country?',
-    options: [
-      { tl: 'Pangulo', en: 'President', correct: true },
-      { tl: 'Gobernador', en: 'Governor' },
-      { tl: 'Mayor', en: 'Mayor' },
-      { tl: 'Pulis', en: 'Police Officer' }
-    ],
-    feedbackCorrectTL: 'Tama! Ang Pangulo ang namumuno sa buong bansa.',
-    feedbackCorrectEN: 'Correct! The President leads the whole country.',
-    feedbackWrongTL: 'Hindi. Ang Pangulo ang pinuno ng Pilipinas.',
-    feedbackWrongEN: 'Not quite. The President is the leader of the Philippines.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang dapat gawin kapag may nakalabag sa batas?',
-    en: 'What should you do when someone breaks the law?',
-    options: [
-      { tl: 'Lumaban agad', en: 'Fight immediately' },
-      { tl: 'Ipaalam sa kinauukulan', en: 'Report to authorities', correct: true },
-      { tl: 'Huwag pansinin', en: 'Ignore it' },
-      { tl: 'Ikalat sa iba', en: 'Tell everyone' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang pagtawag sa tulong ay tamang gawain.',
-    feedbackCorrectEN: 'Great! Calling for help is the right thing to do.',
-    feedbackWrongTL: 'Hindi. Huwag makipagsapalaran — ipaalam sa nakatatanda.',
-    feedbackWrongEN: 'Not quite. Do not take risks — inform an adult.'
-  },
-  { type: 'choice',
-    tl: 'Alin ang TAMA tungkol sa karapatan?',
-    en: 'Which is TRUE about rights?',
-    options: [
-      { tl: 'Karapatan ay walang kasamang tungkulin', en: 'Rights have no duties' },
-      { tl: 'May karapatan, may kaakibat na tungkulin', en: 'Rights come with duties', correct: true },
-      { tl: 'Karapatan ay para sa mayayaman lang', en: 'Rights are only for the rich' },
-      { tl: 'Karapatan ay pwedeng benta', en: 'Rights can be sold' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang bawat karapatan ay may kaakibat na tungkulin.',
-    feedbackCorrectEN: 'Perfect! Every right carries a corresponding duty.',
-    feedbackWrongTL: 'Subukan uli. Tandaan: May karapatan → may tungkulin.',
-    feedbackWrongEN: 'Try again. Remember: Rights and duties go together.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang tawag sa alituntunin na nagpoprotekta sa atin?',
-    en: 'What do we call rules that protect us?',
-    options: [
-      { tl: 'Batas', en: 'Law', correct: true },
-      { tl: 'Laro', en: 'Game' },
-      { tl: 'Kwento', en: 'Story' },
-      { tl: 'Kanta', en: 'Song' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang batas ay tagapagtanggol ng lahat.',
-    feedbackCorrectEN: 'Excellent! The law protects everyone.',
-    feedbackWrongTL: 'Hindi. Ang batas ang nagtatanggol sa atin.',
-    feedbackWrongEN: 'Not quite. Laws protect us all.'
-  },
-  { type: 'choice',
-    tl: 'Sino ang dapat sumunod sa batas?',
-    en: 'Who must follow the law?',
-    options: [
-      { tl: 'Mayayaman lang', en: 'Only the rich' },
-      { tl: 'Lahat ng tao', en: 'Everyone', correct: true },
-      { tl: 'Mga bata lang', en: 'Only children' },
-      { tl: 'Mga opisyal lang', en: 'Only officials' }
-    ],
-    feedbackCorrectTL: 'Tama! Ang batas ay para sa lahat, pantay-pantay tayo.',
-    feedbackCorrectEN: 'Correct! The law applies to everyone — we are equal.',
-    feedbackWrongTL: 'Hindi. Bata man o matanda, dapat sumunod sa batas.',
-    feedbackWrongEN: 'Not quite. Young or old, everyone must follow the law.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang dapat gawin upang maging mabuting mamamayan?',
-    en: 'What makes a good citizen?',
-    options: [
-      { tl: 'Sumunod sa batas at tumulong', en: 'Follow laws and help others', correct: true },
-      { tl: 'Sarili lang ang isipin', en: 'Think only of yourself' },
-      { tl: 'Laging lumalabag sa batas', en: 'Always break rules' },
-      { tl: 'Wala sa nabanggit', en: 'None of the above' }
-    ],
-    feedbackCorrectTL: 'Napakahusay! Ang pagtulong at pagsunod ay nagpapabuti sa ating bayan.',
-    feedbackCorrectEN: 'Excellent! Helping and obeying make our nation better.',
-    feedbackWrongTL: 'Subukan uli. Ang pagtulong sa kapwa ay pagpapala sa sarili rin.',
-    feedbackWrongEN: 'Try again. Helping others blesses you too.'
-  },
-  { type: 'decision',
-    tl: 'Nakita mong kinuha ng kaklase mo ang lapis na hindi sa kanya. Ano ang gagawin mo?',
-    en: 'You saw a classmate take a pencil that is not theirs. What do you do?',
-    options: [
-      { tl: 'Sabihin sa guro nang mahinahon', en: 'Tell the teacher gently', best: true },
-      { tl: 'Sigawan siya agad', en: 'Shout at them immediately' },
-      { tl: 'Huwag pansinin', en: 'Ignore it' },
-      { tl: 'Kumuha rin ng gamit niya', en: 'Take their things too' }
-    ],
-    feedbackTL: 'Ang pagiging tapat ay pagtulong sa kapwa na gumawa ng tama. Huwag magalit — magturo nang maayos.',
-    feedbackEN: 'Being honest helps others do right. Be kind, not angry.'
-  },
-  { type: 'decision',
-    tl: 'Inaaway ka ng kalaro mo. Ano ang gagawin mo?',
-    en: 'A playmate is teasing you. What do you do?',
-    options: [
-      { tl: 'Umalis at sabihin sa nakatatanda', en: 'Walk away and tell an adult', best: true },
-      { tl: 'Umusig din sa kanya', en: 'Tease back' },
-      { tl: 'Makipag-away', en: 'Fight back' },
-      { tl: 'Umiyak nang walang ginagawa', en: 'Cry and do nothing' }
-    ],
-    feedbackTL: 'Ang pag-iwas sa gulo ay tanda ng karunungan. Ipaalam sa nakatatanda upang maayos.',
-    feedbackEN: 'Avoiding trouble shows wisdom. Tell an adult to fix it.'
-  },
-  { type: 'matching',
-    tl: 'Itugma ang Karapatan sa Tungkulin',
-    en: 'Match Right to Duty',
-    pairs: [
-      { a: 'Makapag-aral', b: 'Mag-aral nang mabuti' },
-      { a: 'Makapaglaro', b: 'Maglaro nang maayos' },
-      { a: 'Makapamuhay nang payapa', b: 'Mamuhay nang payapa sa iba' },
-      { a: 'Makapagpahayag', b: 'Makinig din sa iba' }
-    ]
-  },
-  { type: 'sequence',
-    tl: 'Ayusin ang tamang pagtawid sa kalsada',
-    en: 'Arrange proper street-crossing steps',
-    items: [
-      { order: 1, tl: 'Tumingin sa kaliwa, sa kanan, at sa kaliwa muli', en: 'Look left, right, then left again' },
-      { order: 2, tl: 'Tumawid nang mabilis ngunit maingat', en: 'Cross quickly but carefully' },
-      { order: 3, tl: 'Huminto sa gilid ng kalsada', en: 'Stop at the roadside' },
-      { order: 4, tl: 'Tumawid kapag walang sasakyan', en: 'Cross when no vehicle is coming' }
-    ]
-  },
-  { type: 'truefalse',
-    tl: 'Ang batas ay para sa mayayaman lamang.',
-    en: 'Laws are only for rich people.',
-    answer: false,
-    feedbackTL: 'MALI! Ang batas ay para sa lahat — mayaman man o mahirap.',
-    feedbackEN: 'FALSE! Laws apply to everyone — rich or poor.'
-  },
-  { type: 'truefalse',
-    tl: 'Ang pagsunod sa batas ay nagpapakita ng pagmamahal sa bayan.',
-    en: 'Following laws shows love for the country.',
-    answer: true,
-    feedbackTL: 'TAMA! Ang maayos na lipunan ay mula sa pagsunod ng bawat isa.',
-    feedbackEN: 'TRUE! An orderly society comes from everyone obeying.'
-  },
-  { type: 'puzzle',
-    tl: 'Buuin ang salita: B-A-T-A-S',
-    en: 'Arrange the letters: B-A-T-A-S',
-    answerTL: 'BATAS',
-    answerEN: 'LAW',
-    hintTL: 'Ito ang alituntunin na sinusunod natin.',
-    hintEN: 'These are rules we follow.'
-  },
-  { type: 'puzzle',
-    tl: 'Buuin ang salita: T-A-P-A-T-A-N',
-    en: 'Arrange the letters: T-A-P-A-T-A-N',
-    answerTL: 'TAPATAN',
-    answerEN: 'HONESTY',
-    hintTL: 'Ito ang pagsasabi ng totoo kahit walang nakatingin.',
-    hintEN: 'Telling the truth even when no one is watching.'
-  },
-  { type: 'choice',
-    tl: 'Saan maaaring lumapit kapag may panganib?',
-    en: 'Where can you go when in danger?',
-    options: [
-      { tl: 'Sa pulis o bumbero', en: 'Police or Firefighter', correct: true },
-      { tl: 'Sa hindi kakilala', en: 'To a stranger' },
-      { tl: 'Sa madilim na lugar', en: 'To a dark place' },
-      { tl: 'Sa malayong lugar', en: 'To a faraway place' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang mga ito ay handang tumulong sa atin.',
-    feedbackCorrectEN: 'Perfect! They are ready to help us.',
-    feedbackWrongTL: 'Hindi. Lumapit sa mga taong mapagkakatiwalaan.',
-    feedbackWrongEN: 'Not quite. Go to people you can trust.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang ibig sabihin ng pagkakapantay-pantay?',
-    en: 'What does equality mean?',
-    options: [
-      { tl: 'Lahat ay may parehong karapatan at paggalang', en: 'Everyone has equal rights and respect', correct: true },
-      { tl: 'Lahat ay magkakapareho ng mukha', en: 'Everyone looks the same' },
-      { tl: 'Lahat ay may parehong gamit', en: 'Everyone has the same things' },
-      { tl: 'May iba na mas mataas sa iba', en: 'Some are higher than others' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Magkakaiba tayo ngunit pantay-pantay ang ating pagpapahalaga.',
-    feedbackCorrectEN: 'Excellent! We are different but equally valuable.',
-    feedbackWrongTL: 'Hindi. Kahit magkakaiba tayo, pantay ang ating karapatan.',
-    feedbackWrongEN: 'Not quite. Though different, our rights are equal.'
-  }
-],    math: [
-  { type: 'choice',
-    tl: 'May ₱50 ka, bumili ka ng tinapay na ₱20. Magkano ang natitira?',
-    en: 'You have ₱50, bought bread for ₱20. How much is left?',
-    options: [
-      { tl: '₱30', en: '₱30', correct: true },
-      { tl: '₱20', en: '₱20' },
-      { tl: '₱40', en: '₱40' },
-      { tl: '₱70', en: '₱70' }
-    ],
-    feedbackCorrectTL: 'Tumpak! 50 − 20 = 30. Mahusay magbilang!',
-    feedbackCorrectEN: 'Perfect! 50 − 20 = 30. Great counting!',
-    feedbackWrongTL: 'Hindi. 50 minus 20 ay 30 lang.',
-    feedbackWrongEN: 'Not quite. 50 minus 20 equals 30.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang ibig sabihin ng pag-iipon?',
-    en: 'What does saving money mean?',
-    options: [
-      { tl: 'Itabi ang bahagi ng pera para sa kinabukasan', en: 'Set aside money for the future', correct: true },
-      { tl: 'Gastusin agad ang lahat', en: 'Spend everything immediately' },
-      { tl: 'Ipamigay sa lahat', en: 'Give it all away' },
-      { tl: 'Itago at huwag gamitin kailanman', en: 'Hide and never use it' }
-    ],
-    feedbackCorrectTL: 'Tama! Ang pag-iipon ay paghahanda sa oras ng pangangailangan.',
-    feedbackCorrectEN: 'Correct! Saving prepares you for times of need.',
-    feedbackWrongTL: 'Subukan uli. Ang pag-iipon ay pagtutulungan sa sariling kinabukasan.',
-    feedbackWrongEN: 'Try again. Saving is helping your own future.'
-  },
-  { type: 'choice',
-    tl: 'Alin ang mas mahalaga — Pangangailangan o Kagustuhan?',
-    en: 'Which is more important — Needs or Wants?',
-    options: [
-      { tl: 'Pangangailangan muna bago ang kagustuhan', en: 'Needs come before wants', correct: true },
-      { tl: 'Kagustuhan muna bago ang pangangailangan', en: 'Wants come before needs' },
-      { tl: 'Pantay ang halaga nila', en: 'They have equal value' },
-      { tl: 'Wala sa nabanggit', en: 'None of the above' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Pagkain, tirahan, at gamot ang uunahin bago ang laruan.',
-    feedbackCorrectEN: 'Great! Food, shelter, and medicine come before toys.',
-    feedbackWrongTL: 'Hindi. Ang pangangailangan ang hindi pwedeng mawala.',
-    feedbackWrongEN: 'Not quite. Needs are what we cannot live without.'
-  },
-  { type: 'choice',
-    tl: 'May tatlong kaibigan, binigyan mo sila ng tig-2 na kendi. Ilan lahat ang ibinigay mo?',
-    en: 'You have 3 friends, gave each 2 candies. How many candies total did you give?',
-    options: [
-      { tl: '6', en: '6', correct: true },
-      { tl: '5', en: '5' },
-      { tl: '3', en: '3' },
-      { tl: '2', en: '2' }
-    ],
-    feedbackCorrectTL: 'Tumpak! 3 × 2 = 6. Napakagandang magbahagi!',
-    feedbackCorrectEN: 'Perfect! 3 × 2 = 6. Sharing is wonderful!',
-    feedbackWrongTL: 'Subukan uli. Bilangin: 2, 4, 6.',
-    feedbackWrongEN: 'Try again. Count: 2, 4, 6.'
-  },
-  { type: 'choice',
-    tl: 'Ang isang linggo ay may 7 araw. Ilang araw sa loob ng 2 linggo?',
-    en: 'One week has 7 days. How many days in 2 weeks?',
-    options: [
-      { tl: '14', en: '14', correct: true },
-      { tl: '9', en: '9' },
-      { tl: '10', en: '10' },
-      { tl: '12', en: '12' }
-    ],
-    feedbackCorrectTL: 'Tama! 7 + 7 = 14. Mahusay!',
-    feedbackCorrectEN: 'Correct! 7 + 7 = 14. Excellent!',
-    feedbackWrongTL: 'Hindi. 7 dagdagan ng 7 ay 14.',
-    feedbackWrongEN: 'Not quite. 7 plus 7 equals 14.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang tamang paggamit ng pera?',
-    en: 'What is the proper way to use money?',
-    options: [
-      { tl: 'Badyet — ilaan sa pagkain, tirahan, at ipon', en: 'Budget — allocate for food, home, and savings', correct: true },
-      { tl: 'Bili agad ng lahat ng nakikita', en: 'Buy everything you see immediately' },
-      { tl: 'Ipamigay lahat sa hindi kakilala', en: 'Give all to strangers' },
-      { tl: 'Itago at huwag gastusin', en: 'Hide and never spend' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang tamang pagbabadyet ay susi sa maayos na buhay.',
-    feedbackCorrectEN: 'Great! Proper budgeting is the key to a stable life.',
-    feedbackWrongTL: 'Hindi. Ang bawat piso ay may patutunguhan.',
-    feedbackWrongEN: 'Not quite. Every peso should have a purpose.'
-  },
-  { type: 'choice',
-    tl: 'Kung ₱10 ang halaga ng isang lapis, magkano ang 5 lapis?',
-    en: 'If 1 pencil costs ₱10, how much for 5 pencils?',
-    options: [
-      { tl: '₱50', en: '₱50', correct: true },
-      { tl: '₱15', en: '₱15' },
-      { tl: '₱40', en: '₱40' },
-      { tl: '₱5', en: '₱5' }
-    ],
-    feedbackCorrectTL: 'Tumpak! 10 × 5 = 50. Magaling sa pagpaparami!',
-    feedbackCorrectEN: 'Perfect! 10 × 5 = 50. Great multiplication!',
-    feedbackWrongTL: 'Subukan uli. Tig-10 bawat isa — 10, 20, 30, 40, 50.',
-    feedbackWrongEN: 'Try again. 10 each — 10, 20, 30, 40, 50.'
-  },
-  { type: 'choice',
-    tl: 'May ₱100 ka, bumili ka ng pagkain na ₱75. Magkano ang sukli?',
-    en: 'You have ₱100, bought food for ₱75. What is your change?',
-    options: [
-      { tl: '₱25', en: '₱25', correct: true },
-      { tl: '₱35', en: '₱35' },
-      { tl: '₱175', en: '₱175' },
-      { tl: '₱15', en: '₱15' }
-    ],
-    feedbackCorrectTL: 'Tama! 100 − 75 = 25. Tumpak ang pagbadyet!',
-    feedbackCorrectEN: 'Correct! 100 − 75 = 25. Budgeting well!',
-    feedbackWrongTL: 'Hindi. 100 bawasan ng 75 ay 25.',
-    feedbackWrongEN: 'Not quite. 100 minus 75 equals 25.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang tawag sa perang inilalayo para sa kinabukasan?',
-    en: 'What do we call money set aside for the future?',
-    options: [
-      { tl: 'Ipon', en: 'Savings', correct: true },
-      { tl: 'Gastos', en: 'Expense' },
-      { tl: 'Utang', en: 'Debt' },
-      { tl: 'Kita', en: 'Income' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang ipon ay nagiging tulong sa oras ng pangangailangan.',
-    feedbackCorrectEN: 'Excellent! Savings become help in times of need.',
-    feedbackWrongTL: 'Subukan uli. Ito ang perang hindi ginagastos agad.',
-    feedbackWrongEN: 'Try again. This is money not spent right away.'
-  },
-  { type: 'choice',
-    tl: 'Alin ang pinakamalaking bilang?',
-    en: 'Which is the largest number?',
-    options: [
-      { tl: '100', en: '100', correct: true },
-      { tl: '50', en: '50' },
-      { tl: '99', en: '99' },
-      { tl: '10', en: '10' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang 100 ay mas malaki sa 99.',
-    feedbackCorrectEN: 'Perfect! 100 is larger than 99.',
-    feedbackWrongTL: 'Hindi. Tingnan ang kaliwa — ang 1 sa unahan ay mas malaki.',
-    feedbackWrongEN: 'Not quite. Look at the first digit — 1 is bigger.'
-  },
-  { type: 'decision',
-    tl: 'Gusto mo ng bagong laruan, pero kulang ang pera mo. Ano ang gagawin mo?',
-    en: 'You want a new toy but your money is not enough. What do you do?',
-    options: [
-      { tl: 'Mag-ipon hanggang sapat na', en: 'Save until you have enough', best: true },
-      { tl: 'Hiram nang hiram sa iba', en: 'Keep borrowing from others' },
-      { tl: 'Itago ang pera ng iba', en: 'Take someone else\'s money' },
-      { tl: 'Huwag na magkaroon', en: 'Never have it' }
-    ],
-    feedbackTL: 'Ang pag-iipon ay nagtuturo ng tiyaga. Kapag sapat na, makukuha mo nang marangal ang gusto mo.',
-    feedbackEN: 'Saving teaches patience. When you have enough, you get what you want honorably.'
-  },
-  { type: 'decision',
-    tl: 'May sapat kang pera para sa pagkain at may natitira. Ano ang gagawin sa natitira?',
-    en: 'You have enough money for food and some left over. What do you do with the rest?',
-    options: [
-      { tl: 'Ilagay sa alkansya para sa kinabukasan', en: 'Put in savings for the future', best: true },
-      { tl: 'Bili agad ng kagustuhan', en: 'Buy something you want right away' },
-      { tl: 'Ipamigay lahat', en: 'Give it all away' },
-      { tl: 'Itapon', en: 'Throw it away' }
-    ],
-    feedbackTL: 'Ang bawat piso na inilalayo ay pagtulong sa sarili sa darating na panahon.',
-    feedbackEN: 'Every peso saved is helping yourself in days to come.'
-  },
-  { type: 'matching',
-    tl: 'Itugma ang Halaga ng Pera sa Kabuuan',
-    en: 'Match Money Amount to Total',
-    pairs: [
-      { a: 'Isang ₱20', b: '₱20' },
-      { a: 'Dalawang ₱10', b: '₱20' },
-      { a: 'Apat na ₱5', b: '₱20' },
-      { a: 'Dalawampung ₱1', b: '₱20' }
-    ]
-  },
-  { type: 'sequence',
-    tl: 'Ayusin ang tamang pagbabadyet',
-    en: 'Arrange proper budgeting steps',
-    items: [
-      { order: 1, tl: 'Alamin kung magkano ang mayroon', en: 'Know how much you have' },
-      { order: 2, tl: 'Ilaan sa pangangailangan', en: 'Set aside for needs' },
-      { order: 3, tl: 'Magtabi para sa ipon', en: 'Save something' },
-      { order: 4, tl: 'Ang natitira — para sa kagustuhan', en: 'What remains — for wants' }
-    ]
-  },
-  { type: 'truefalse',
-    tl: 'Mas mabuti nang mag-ipon kaysa mangutang.',
-    en: 'It is better to save than to borrow.',
-    answer: true,
-    feedbackTL: 'TAMA! Ang ipon ay pag-aari mo; ang utang ay babayaran.',
-    feedbackEN: 'TRUE! Savings are yours; borrowed money must be returned.'
-  },
-  { type: 'truefalse',
-    tl: 'Ang lahat ng nakikita sa tindahan ay dapat bilhin.',
-    en: 'Everything you see in a store should be bought.',
-    answer: false,
-    feedbackTL: 'MALI! Isipin muna kung kailangan ba talaga.',
-    feedbackEN: 'FALSE! Think first — do you really need it?'
-  },
-  { type: 'puzzle',
-    tl: 'Buuin ang salita: I-P-O-N',
-    en: 'Arrange the letters: I-P-O-N',
-    answerTL: 'IPON',
-    answerEN: 'SAVINGS',
-    hintTL: 'Ito ang perang itinatabi para sa bukas.',
-    hintEN: 'Money set aside for tomorrow.'
-  },
-  { type: 'puzzle',
-    tl: 'Buuin ang salita: B-A-D-Y-E-T',
-    en: 'Arrange the letters: B-A-D-Y-E-T',
-    answerTL: 'BADYET',
-    answerEN: 'BUDGET',
-    hintTL: 'Ito ang pagpaplano kung saan napupunta ang pera.',
-    hintEN: 'Planning where your money goes.'
-  },
-  { type: 'choice',
-    tl: 'Ang oras ay mahalaga. Ilang oras ang mayroon tayo sa isang araw?',
-    en: 'Time is precious. How many hours in one day?',
-    options: [
-      { tl: '24 oras', en: '24 hours', correct: true },
-      { tl: '12 oras', en: '12 hours' },
-      { tl: '10 oras', en: '10 hours' },
-      { tl: '36 oras', en: '36 hours' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Gamitin nang wasto ang bawat oras — mag-aral, tumulong, magpahinga.',
-    feedbackCorrectEN: 'Perfect! Use every hour well — study, help, rest.',
-    feedbackWrongTL: 'Hindi. Mula hatinggabi hanggang susunod na hatinggabi — 24 oras.',
-    feedbackWrongEN: 'Not quite. From midnight to next midnight — 24 hours.'
-  },
-  { type: 'choice',
-    tl: 'May 9 na mangga, ibinigay mo ang 4 sa kapatid mo. Ilan ang natira sa iyo?',
-    en: 'You have 9 mangoes, gave 4 to your sibling. How many do you have left?',
-    options: [
-      { tl: '5', en: '5', correct: true },
-      { tl: '4', en: '4' },
-      { tl: '13', en: '13' },
-      { tl: '6', en: '6' }
-    ],
-    feedbackCorrectTL: 'Mahusay! 9 − 4 = 5. Napakabuti mong magbahagi!',
-    feedbackCorrectEN: 'Excellent! 9 − 4 = 5. You are very generous!',
-    feedbackWrongTL: 'Subukan uli. Bawasan ang 4 mula sa 9.',
-    feedbackWrongEN: 'Try again. Subtract 4 from 9.'
-  }
-],
+
     physical: [
-  { type: 'choice',
-    tl: 'Ano ang pinakamabuting gawin upang lumakas ang katawan?',
-    en: 'What is best to do to strengthen the body?',
-    options: [
-      { tl: 'Ehersisyo, tamang pagkain, at sapat na tulog', en: 'Exercise, proper food, and enough sleep', correct: true },
-      { tl: 'Matulog nang buong araw', en: 'Sleep all day' },
-      { tl: 'Kumain ng maraming matatamis', en: 'Eat lots of sweets' },
-      { tl: 'Huwag kumilos', en: 'Do not move' }
+        {
+            type: 'choice',
+            tl: 'Ano ang pinakamabuting gawin upang lumakas ang katawan?',
+            en: 'What is best to do to strengthen the body?',
+            options: [
+                { tl: 'Ehersisyo, tamang pagkain, at sapat na tulog', en: 'Exercise, proper food, and enough sleep', correct: true },
+                { tl: 'Matulog nang buong araw', en: 'Sleep all day' },
+                { tl: 'Kumain ng maraming matatamis', en: 'Eat lots of sweets' },
+                { tl: 'Huwag kumilos', en: 'Do not move' }
+            ],
+            feedbackCorrectTL: 'Tumpak! Ang paggalaw ay nagbibigay lakas at sigla.',
+            feedbackCorrectEN: 'Perfect! Movement gives strength and vitality.',
+            feedbackWrongTL: 'Hindi. Ang katawan ay nilikha upang kumilos.',
+            feedbackWrongEN: 'Not quite. The body was made to move.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang dapat gawin bago magsimula ang matinding laro?',
+            en: 'What should you do before vigorous play?',
+            options: [
+                { tl: 'Magpainit ng katawan', en: 'Warm up your body', correct: true },
+                { tl: 'Kumain agad nang marami', en: 'Eat a lot immediately' },
+                { tl: 'Tumakbo agad nang mabilis', en: 'Run fast right away' },
+                { tl: 'Uminom ng napakaraming tubig', en: 'Drink too much water' }
+            ],
+            feedbackCorrectTL: 'Tama! Ang pagpainit ay pumipigil sa pagkakasugat.',
+            feedbackCorrectEN: 'Correct! Warming up prevents injuries.',
+            feedbackWrongTL: 'Hindi. Ang katawan ay kailangang ihanda muna.',
+            feedbackWrongEN: 'Not quite. The body needs to be prepared first.'
+        },
+        {
+            type: 'choice',
+            tl: 'Saan ligtas maglaro?',
+            en: 'Where is it safe to play?',
+            options: [
+                { tl: 'Sa palaruan o ligtas na lugar', en: 'Playground or safe area', correct: true },
+                { tl: 'Sa gitna ng kalsada', en: 'In the middle of the road' },
+                { tl: 'Sa mataas na pader', en: 'On high walls' },
+                { tl: 'Sa ilog na malalim', en: 'In deep rivers' }
+            ],
+            feedbackCorrectTL: 'Tumpak! Ang kaligtasan ay hindi dapat isinasakripisyo.',
+            feedbackCorrectEN: 'Perfect! Safety should never be sacrificed.',
+            feedbackWrongTL: 'Hindi. Ang kalsada ay para sa sasakyan, hindi para sa laro.',
+            feedbackWrongEN: 'Not quite. Roads are for vehicles, not play.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang gagawin kapag may lumapit na hindi kakilala?',
+            en: 'What do you do when a stranger approaches?',
+            options: [
+                { tl: 'Umalis agad at lumapit sa nakatatanda', en: 'Move away and go to a trusted adult', correct: true },
+                { tl: 'Sumama agad', en: 'Go with them immediately' },
+                { tl: 'Tanggapin ang regalo', en: 'Accept gifts' },
+                { tl: 'Sabihin ang lahat ng impormasyon', en: 'Tell them everything' }
+            ],
+            feedbackCorrectTL: 'Tama! Ang pag-iingat sa sarili ay pagmamahal sa pamilya.',
+            feedbackCorrectEN: 'Correct! Protecting yourself is loving your family.',
+            feedbackWrongTL: 'Hindi. Mag-ingat at lumapit sa taong mapagkakatiwalaan.',
+            feedbackWrongEN: 'Not quite. Be careful and go to someone you trust.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang tamang tindig ng katawan?',
+            en: 'What is proper body posture?',
+            options: [
+                { tl: 'Tuwid ang likod, taas ang noo', en: 'Straight back, head up', correct: true },
+                { tl: 'Yuko ang likod', en: 'Slouched back' },
+                { tl: 'Laging nakadukdok', en: 'Always looking down' },
+                { tl: 'Matigas ang galaw', en: 'Stiff movements' }
+            ],
+            feedbackCorrectTL: 'Tumpak! Ang maayos na tindig ay nagpapakita ng tiwala sa sarili.',
+            feedbackCorrectEN: 'Perfect! Good posture shows self-confidence.',
+            feedbackWrongTL: 'Hindi. Ang tamang tindig ay nag-iingat sa iyong likod at kalusugan.',
+            feedbackWrongEN: 'Not quite. Good posture protects your back and health.'
+        }
     ],
-    feedbackCorrectTL: 'Tumpak! Ang paggalaw ay nagbibigay lakas at sigla.',
-    feedbackCorrectEN: 'Perfect! Movement gives strength and vitality.',
-    feedbackWrongTL: 'Hindi. Ang katawan ay nilikha upang kumilos.',
-    feedbackWrongEN: 'Not quite. The body was made to move.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang dapat gawin bago magsimula ang matinding laro o takbuhan?',
-    en: 'What should you do before vigorous play or running?',
-    options: [
-      { tl: 'Magpainit ng katawan', en: 'Warm up your body', correct: true },
-      { tl: 'Kumain agad nang marami', en: 'Eat a lot immediately' },
-      { tl: 'Tumakbo agad nang mabilis', en: 'Run fast right away' },
-      { tl: 'Uminom ng napakaraming tubig', en: 'Drink too much water' }
-    ],
-    feedbackCorrectTL: 'Tama! Ang pagpainit ay pumipigil sa pagkakasugat.',
-    feedbackCorrectEN: 'Correct! Warming up prevents injuries.',
-    feedbackWrongTL: 'Hindi. Ang katawan ay kailangang ihanda muna.',
-    feedbackWrongEN: 'Not quite. The body needs to be prepared first.'
-  },
-  { type: 'choice',
-    tl: 'Paano maglaro nang patas?',
-    en: 'How do you play fairly?',
-    options: [
-      { tl: 'Sundin ang tuntunin at igalang ang kalaban', en: 'Follow rules and respect opponents', correct: true },
-      { tl: 'Manalo sa lahat ng paraan', en: 'Win by any means' },
-      { tl: 'Magsumbat sa kapwa', en: 'Blame others' },
-      { tl: 'Umalis kapag natatalo', en: 'Leave when losing' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang tunay na panalo ay may kasamang dangal.',
-    feedbackCorrectEN: 'Great! True victory comes with honor.',
-    feedbackWrongTL: 'Hindi. Ang tunay na lakas ay nasa paggalang sa iba.',
-    feedbackWrongEN: 'Not quite. Real strength is in respecting others.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang gagawin kapag may kasamang nasaktan sa paglalaro?',
-    en: 'What do you do when someone gets hurt while playing?',
-    options: [
-      { tl: 'Tumulong at ipaalam sa nakatatanda', en: 'Help and inform an adult', correct: true },
-      { tl: 'Tumawa at magpatuloy', en: 'Laugh and continue' },
-      { tl: 'Takasan', en: 'Run away' },
-      { tl: 'Huwag pansinin', en: 'Ignore it' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang pagtulong sa kapwa ay tanda ng dakilang pagkatao.',
-    feedbackCorrectEN: 'Perfect! Helping others shows great character.',
-    feedbackWrongTL: 'Hindi. Ang kalaro ay kaibigan — hindi iiwanan.',
-    feedbackWrongEN: 'Not quite. Playmates are friends — never left behind.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang dapat gawin sa mainit na araw habang naglalaro?',
-    en: 'What should you do while playing under the hot sun?',
-    options: [
-      { tl: 'Uminom ng tubig at magpahinga paminsan-minsan', en: 'Drink water and rest sometimes', correct: true },
-      { tl: 'Maglaro nang walang tigil', en: 'Play without stopping' },
-      { tl: 'Huwag uminom ng tubig', en: 'Do not drink water' },
-      { tl: 'Magtakip ng makapal na damit', en: 'Wear thick clothes' }
-    ],
-    feedbackCorrectTL: 'Tama! Ang katawan ay nangangailangan ng tubig at pahinga.',
-    feedbackCorrectEN: 'Correct! The body needs water and rest.',
-    feedbackWrongTL: 'Hindi. Ang sobrang init ay maaaring makapagpahina sa atin.',
-    feedbackWrongEN: 'Not quite. Too much heat can weaken us.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang ibig sabihin ng pagiging disiplinado?',
-    en: 'What does being disciplined mean?',
-    options: [
-      { tl: 'Gawin ang tama kahit walang nakatingin', en: 'Do what is right even when no one is watching', correct: true },
-      { tl: 'Gawin lang kapag inutusan', en: 'Only do when told' },
-      { tl: 'Gawin ang gusto mo', en: 'Do whatever you want' },
-      { tl: 'Sumunod kapag may parusa', en: 'Obey to avoid punishment' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang disiplina ay kalayaan mula sa kaguluhan.',
-    feedbackCorrectEN: 'Excellent! Discipline is freedom from chaos.',
-    feedbackWrongTL: 'Hindi. Ang tunay na disiplina ay nanggagaling sa sarili.',
-    feedbackWrongEN: 'Not quite. True discipline comes from within.'
-  },
-  { type: 'choice',
-    tl: 'Saan ligtas maglaro?',
-    en: 'Where is it safe to play?',
-    options: [
-      { tl: 'Sa palaruan o ligtas na lugar', en: 'Playground or safe area', correct: true },
-      { tl: 'Sa gitna ng kalsada', en: 'In the middle of the road' },
-      { tl: 'Sa mataas na pader', en: 'On high walls' },
-      { tl: 'Sa ilog na malalim', en: 'In deep rivers' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang kaligtasan ay hindi dapat isinasakripisyo.',
-    feedbackCorrectEN: 'Perfect! Safety should never be sacrificed.',
-    feedbackWrongTL: 'Hindi. Ang kalsada ay para sa sasakyan, hindi para sa laro.',
-    feedbackWrongEN: 'Not quite. Roads are for vehicles, not play.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang gagawin kapag may lumapit na hindi kakilala?',
-    en: 'What do you do when a stranger approaches?',
-    options: [
-      { tl: 'Umalis agad at lumapit sa nakatatanda', en: 'Move away and go to a trusted adult', correct: true },
-      { tl: 'Sumama agad', en: 'Go with them immediately' },
-      { tl: 'Tanggapin ang regalo', en: 'Accept gifts' },
-      { tl: 'Sabihin ang lahat ng impormasyon', en: 'Tell them everything' }
-    ],
-    feedbackCorrectTL: 'Tama! Ang pag-iingat sa sarili ay pagmamahal sa pamilya.',
-    feedbackCorrectEN: 'Correct! Protecting yourself is loving your family.',
-    feedbackWrongTL: 'Hindi. Hindi lahat ng lumalapit ay masama — ngunit mag-ingat tayo.',
-    feedbackWrongEN: 'Not quite. Not everyone is bad — but we must be careful.'
-  },
-  { type: 'choice',
-    tl: 'Paano tumawag ng tulong sa oras ng panganib?',
-    en: 'How do you call for help in danger?',
-    options: [
-      { tl: 'Tawagin ang pulis, bumbero, o nakatatanda', en: 'Call police, fire, or trusted adult', correct: true },
-      { tl: 'Manahimik na lang', en: 'Stay silent' },
-      { tl: 'Lumaban mag-isa', en: 'Fight alone' },
-      { tl: 'Sumigaw sa lahat ng tao', en: 'Shout at everyone' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang paghingi ng tulong ay hindi kahinaan — ito ay talino.',
-    feedbackCorrectEN: 'Great! Asking for help is not weakness — it is wisdom.',
-    feedbackWrongTL: 'Hindi. Ang mga taong may tungkulin ay handang tumulong.',
-    feedbackWrongEN: 'Not quite. People with duties are ready to help.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang tamang tindig ng katawan?',
-    en: 'What is proper body posture?',
-    options: [
-      { tl: 'Tuwid ang likod, taas ang noo, magaan ang paglakad', en: 'Straight back, head up, light step', correct: true },
-      { tl: 'Yuko ang likod', en: 'Slouched back' },
-      { tl: 'Laging nakadukdok', en: 'Always looking down' },
-      { tl: 'Matigas ang galaw', en: 'Stiff movements' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang maayos na tindig ay nagpapakita ng tiwala sa sarili.',
-    feedbackCorrectEN: 'Perfect! Good posture shows self-confidence.',
-    feedbackWrongTL: 'Hindi. Ang tamang tindig ay nag-iingat sa iyong likod at kalusugan.',
-    feedbackWrongEN: 'Not quite. Good posture protects your back and health.'
-  },
-  { type: 'decision',
-    tl: 'Natalo ka sa laro. Ano ang gagawin mo?',
-    en: 'You lost the game. What do you do?',
-    options: [
-      { tl: 'Batiin ang nanalo at sumubok muli', en: 'Congratulate the winner and try again', best: true },
-      { tl: 'Magalit at umalis', en: 'Get angry and leave' },
-      { tl: 'Sumbatan ang kalaro', en: 'Blame your playmate' },
-      { tl: 'Hindi na muling maglaro', en: 'Never play again' }
-    ],
-    feedbackTL: 'Ang pagtanggap sa pagkatalo ay tanda ng paglaki. Ang bawat pagkatalo ay pagkatuto.',
-    feedbackEN: 'Accepting defeat shows maturity. Every loss is a lesson.'
-  },
-  { type: 'decision',
-    tl: 'Inaanyayahan kang lumangoy sa ilog na malalim. Ano ang gagawin mo?',
-    en: 'You are invited to swim in a deep river. What do you do?',
-    options: [
-      { tl: 'Tumanggi at ipaalam sa nakatatanda', en: 'Refuse and tell an adult', best: true },
-      { tl: 'Sumama kahit walang paalam', en: 'Go without permission' },
-      { tl: 'Sumama kahit hindi marunong lumangoy', en: 'Go even if you cannot swim' },
-      { tl: 'Hikayatin ang iba na sumama', en: 'Convince others to join' }
-    ],
-    feedbackTL: 'Ang kaligtasan ay hindi isinasakripisyo para sa kasiyahan.',
-    feedbackEN: 'Safety is never sacrificed for fun.'
-  },
-  { type: 'matching',
-    tl: 'Itugma ang Ehersisyo sa Bahagi ng Katawan',
-    en: 'Match Exercise to Body Part',
-    pairs: [
-      { a: 'Takbuhan', b: 'Lakas ng binti at puso' },
-      { a: 'Hilahang lubid', b: 'Lakas ng braso at balikat' },
-      { a: 'Pagtalon', b: 'Lakas ng binti at tiyaga' },
-      { a: 'Paglalakad', b: 'Kabuuan ng katawan' }
-    ]
-  },
-  { type: 'sequence',
-    tl: 'Ayusin ang tamang paghahanda bago maglaro',
-    en: 'Arrange proper preparation before playing',
-    items: [
-      { order: 1, tl: 'Magpaalam sa magulang', en: 'Ask permission from parents' },
-      { order: 2, tl: 'Magbihis ng tamang damit', en: 'Wear proper clothes' },
-      { order: 3, tl: 'Magpainit ng katawan', en: 'Warm up your body' },
-      { order: 4, tl: 'Maglaro nang masaya at ligtas', en: 'Play happily and safely' }
-    ]
-  },
-  { type: 'truefalse',
-    tl: 'Ang lakas ng katawan ay walang kaugnayan sa lakas ng isip.',
-    en: 'Physical strength has nothing to do with mental strength.',
-    answer: false,
-    feedbackTL: 'MALI! Ang malusog na katawan ay nagtutulak sa malinaw na isipan.',
-    feedbackEN: 'FALSE! A healthy body supports a clear mind.'
-  },
-  { type: 'truefalse',
-    tl: 'Ang pagtulong sa kalaro kapag nahulog ay tanda ng tunay na lakas.',
-    en: 'Helping a playmate who fell is a sign of true strength.',
-    answer: true,
-    feedbackTL: 'TAMA! Ang pinakamalakas ay ang may malasakit sa kapwa.',
-    feedbackEN: 'TRUE! The strongest person is one who cares for others.'
-  },
-  { type: 'puzzle',
-    tl: 'Buuin ang salita: L-A-K-A-S',
-    en: 'Arrange the letters: L-A-K-A-S',
-    answerTL: 'LAKAS',
-    answerEN: 'STRENGTH',
-    hintTL: 'Ito ang kakayahang kumilos, tumulong, at magtiyaga.',
-    hintEN: 'The ability to act, help, and persevere.'
-  },
-  { type: 'puzzle',
-    tl: 'Buuin ang salita: K-A-L-I-G-T-A-S-A-N',
-    en: 'Arrange the letters: K-A-L-I-G-T-A-S-A-N',
-    answerTL: 'KALIGTASAN',
-    answerEN: 'SAFETY',
-    hintTL: 'Ito ang pag-iingat sa sarili at sa kapwa sa lahat ng oras.',
-    hintEN: 'Protecting yourself and others at all times.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang pinakamahalagang paalala sa paggamit ng hagdan?',
-    en: 'What is the most important reminder when using stairs?',
-    options: [
-      { tl: 'Huwag tumakbo, hawakan ang rehas', en: 'Do not run, hold the handrail', correct: true },
-      { tl: 'Tumakbo nang mabilis', en: 'Run fast' },
-      { tl: 'Talon mula sa itaas', en: 'Jump from the top' },
-      { tl: 'Huwag humawak sa rehas', en: 'Do not hold the rail' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang pag-iingat sa maliliit na bagay ay pumipigil sa malaking kapahamakan.',
-    feedbackCorrectEN: 'Perfect! Care in small things prevents big trouble.',
-    feedbackWrongTL: 'Hindi. Ang hagdan ay hindi palaruan.',
-    feedbackWrongEN: 'Not quite. Stairs are not a playground.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang dapat gawin kapag may lindol?',
-    en: 'What should you do during an earthquake?',
-    options: [
-      { tl: 'Yumuko, magtago, at kumapit', en: 'Drop, cover, and hold on', correct: true },
-      { tl: 'Tumakbo agad palabas', en: 'Run outside immediately' },
-      { tl: 'Sumigaw nang malakas', en: 'Shout loudly' },
-      { tl: 'Pumasok sa loob ng gusali', en: 'Go inside a building' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ito ang tamang hakbang para sa kaligtasan.',
-    feedbackCorrectEN: 'Excellent! These are the correct steps for safety.',
-    feedbackWrongTL: 'Hindi. Manatiling ligtas sa loob hanggang huminto ang pagyanig.',
-    feedbackWrongEN: 'Not quite. Stay safely inside until shaking stops.'
-  }
-],
+
     character: [
-  { type: 'choice',
-    tl: 'Ano ang pinakamahalagang yaman ng isang tao?',
-    en: 'What is a person\'s most important treasure?',
-    options: [
-      { tl: 'Mabuting pag-uugali', en: 'Good character', correct: true },
-      { tl: 'Maraming pera', en: 'Lots of money' },
-      { tl: 'Magandang damit', en: 'Nice clothes' },
-      { tl: 'Malaking bahay', en: 'Big house' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang pag-uugali ang kasama mo habambuhay — hindi ito nabibili.',
-    feedbackCorrectEN: 'Perfect! Character stays with you forever — it cannot be bought.',
-    feedbackWrongTL: 'Hindi. Ang lahat ng bagay ay nawawala, ngunit ang pag-uugali ay nananatili.',
-    feedbackWrongEN: 'Not quite. Things fade away, but character remains.'
-  },
-  { type: 'choice',
-    tl: 'Paano magiging mabuting kaibigan?',
-    en: 'How do you become a good friend?',
-    options: [
-      { tl: 'Makinig, tumulong, at maging tapat', en: 'Listen, help, and be true', correct: true },
-      { tl: 'Magbigay ng regalo palagi', en: 'Always give gifts' },
-      { tl: 'Sang-ayon sa lahat ng gusto', en: 'Agree with everything' },
-      { tl: 'Maging mayaman', en: 'Be rich' }
-    ],
-    feedbackCorrectTL: 'Tama! Ang tunay na kaibigan ay nariyan sa hirap at ginhawa.',
-    feedbackCorrectEN: 'Correct! A true friend is there in hard times and good.',
-    feedbackWrongTL: 'Hindi. Ang pagmamahal at pagtanggap ang pinakamahalaga.',
-    feedbackWrongEN: 'Not quite. Love and acceptance matter most.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang gagawin kapag nakagawa ka ng mali?',
-    en: 'What do you do when you have done something wrong?',
-    options: [
-      { tl: 'Aminin at humingi ng tawad', en: 'Admit it and ask for forgiveness', correct: true },
-      { tl: 'Itago ang ginawa', en: 'Hide what you did' },
-      { tl: 'Isisi sa iba', en: 'Blame others' },
-      { tl: 'Umalis na lang', en: 'Just walk away' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang pag-amin ay tanda ng katapangan at paglaki.',
-    feedbackCorrectEN: 'Great! Admitting shows courage and maturity.',
-    feedbackWrongTL: 'Hindi. Ang pagtatago ay nagpapabigat sa loob — aminin mo.',
-    feedbackWrongEN: 'Not quite. Hiding weighs heavy — admit it.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang ibig sabihin ng pagtitiwala sa sarili?',
-    en: 'What does self-confidence mean?',
-    options: [
-      { tl: 'Naniniwala sa sariling kakayahan kahit mahirap', en: 'Believe in your ability even when hard', correct: true },
-      { tl: 'Akala mo alam mo ang lahat', en: 'Think you know everything' },
-      { tl: 'Hindi na kailangan ng tulong', en: 'Never need help' },
-      { tl: 'Laging una sa lahat', en: 'Always be first' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang tiwala sa sarili ay nagbibigay lakas upang subukan uli.',
-    feedbackCorrectEN: 'Perfect! Self-confidence gives strength to try again.',
-    feedbackWrongTL: 'Hindi. Ang pagtitiwala ay hindi pagmamataas — ito ay pag-asa sa sarili.',
-    feedbackWrongEN: 'Not quite. Confidence is not pride — it is hope in yourself.'
-  },
-  { type: 'choice',
-    tl: 'Sino ang dapat tularan?',
-    en: 'Who should you imitate?',
-    options: [
-      { tl: 'Ang gumagawa ng mabuti sa kapwa', en: 'Those who do good to others', correct: true },
-      { tl: 'Ang mayaman', en: 'The rich' },
-      { tl: 'Ang maganda', en: 'The beautiful' },
-      { tl: 'Ang malakas', en: 'The strong' }
-    ],
-    feedbackCorrectTL: 'Tama! Ang kabutihan ay namamana ng lahat.',
-    feedbackCorrectEN: 'Correct! Goodness benefits everyone.',
-    feedbackWrongTL: 'Hindi. Ang tunay na dakila ay ang nagmamalasakit sa iba.',
-    feedbackWrongEN: 'Not quite. The truly great are those who care for others.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang gagawin kapag may kapatid o kalaro na nalulungkot?',
-    en: 'What do you do when a sibling or playmate is sad?',
-    options: [
-      { tl: 'Damayan at aliwin sila', en: 'Comfort and cheer them', correct: true },
-      { tl: 'Tawanan sila', en: 'Laugh at them' },
-      { tl: 'Huwag pansinin', en: 'Ignore them' },
-      { tl: 'Sabihing malandi sila', en: 'Call them sensitive' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang pagdamay ay nagpapagaan sa bigat ng damdamin.',
-    feedbackCorrectEN: 'Excellent! Comfort lightens the heaviness of feelings.',
-    feedbackWrongTL: 'Hindi. Ang bawat isa ay nangangailangan ng malasakit minsan.',
-    feedbackWrongEN: 'Not quite. Everyone needs care sometimes.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang ibig sabihin ng paggalang sa nakatatanda?',
-    en: 'What does respecting elders mean?',
-    options: [
-      { tl: 'Sumunod, gumamit ng magagalang na salita, at tumulong', en: 'Obey, use polite words, and help', correct: true },
-      { tl: 'Matakot sa kanila', en: 'Be afraid of them' },
-      { tl: 'Gawin lang kapag nakatingin sila', en: 'Only do it when they watch' },
-      { tl: 'Bigyan sila ng regalo', en: 'Give them gifts' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang paggalang ay pagpapakita ng pagmamahal sa nagpalaki sa atin.',
-    feedbackCorrectEN: 'Perfect! Respect shows love for those who raised us.',
-    feedbackWrongTL: 'Hindi. Ang paggalang ay kusang-loob — hindi sapilitan.',
-    feedbackWrongEN: 'Not quite. Respect is freely given — not forced.'
-  },
-  { type: 'choice',
-    tl: 'Paano magiging mabuting mamamayan ang isang bata?',
-    en: 'How does a child become a good citizen?',
-    options: [
-      { tl: 'Sumunod sa tuntunin, tumulong, at maging malinis', en: 'Follow rules, help, and keep clean', correct: true },
-      { tl: 'Maging matalino lang', en: 'Be smart only' },
-      { tl: 'Maging mayaman balang araw', en: 'Become rich someday' },
-      { tl: 'Wala sa nabanggit', en: 'None of the above' }
-    ],
-    feedbackCorrectTL: 'Tama! Ang pagbabago sa bayan ay nagsisimula sa sarili.',
-    feedbackCorrectEN: 'Correct! Change in our nation starts with ourselves.',
-    feedbackWrongTL: 'Hindi. Ang maliliit na gawa ng kabutihan ay lumalaki at nagbubunga.',
-    feedbackWrongEN: 'Not quite. Small acts of goodness grow and bear fruit.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang gagawin kapag mayroon kang labis?',
-    en: 'What do you do when you have more than enough?',
-    options: [
-      { tl: 'Magbahagi sa nangangailangan', en: 'Share with those in need', correct: true },
-      { tl: 'Itago lahat', en: 'Keep everything' },
-      { tl: 'Ipagmalaki sa iba', en: 'Show off to others' },
-      { tl: 'Itapon ang labis', en: 'Throw away the excess' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang pagbabahagi ay nagpapasaya sa nagbibigay at tumatanggap.',
-    feedbackCorrectEN: 'Great! Sharing makes happy both the giver and receiver.',
-    feedbackWrongTL: 'Hindi. Ang labis sa iyo ay kailangan ng iba.',
-    feedbackWrongEN: 'Not quite. What is extra to you is needed by someone else.'
-  },
-  { type: 'choice',
-    tl: 'Bakit mahalagang magkaroon ng pangarap?',
-    en: 'Why is it important to have dreams?',
-    options: [
-      { tl: 'Nagbibigay ito ng direksyon at pag-asa sa buhay', en: 'It gives direction and hope in life', correct: true },
-      { tl: 'Para magmayaman balang araw', en: 'To become rich someday' },
-      { tl: 'Para kilala ka ng lahat', en: 'So everyone knows you' },
-      { tl: 'Wala itong kabuluhan', en: 'It has no importance' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ang pangarap ang hila sa atin upang magsikap.',
-    feedbackCorrectEN: 'Perfect! Dreams pull us forward to strive.',
-    feedbackWrongTL: 'Hindi. Ang pangarap ay nagtuturo kung saan tayo patungo.',
-    feedbackWrongEN: 'Not quite. Dreams show where we are going.'
-  },
-  { type: 'decision',
-    tl: 'Nakita mong naiiba ang pananamit ng kaklase mo. Ano ang gagawin mo?',
-    en: 'You see a classmate dressed differently. What do you do?',
-    options: [
-      { tl: 'Tanggapin siya at makipagkaibigan nang maayos', en: 'Accept them and be friendly', best: true },
-      { tl: 'Tawanan siya kasama ang iba', en: 'Laugh with others' },
-      { tl: 'Iwasan siya', en: 'Avoid them' },
-      { tl: 'Sumbatan siya', en: 'Make fun of them' }
-    ],
-    feedbackTL: 'Ang pagkakaiba-iba ay nagpapaganda sa ating mundo — lahat tayo ay mahalaga.',
-    feedbackEN: 'Differences make our world beautiful — we are all valuable.'
-  },
-  { type: 'decision',
-    tl: 'Marami kang gawain sa paaralan at bahay. Paano mo ito gagawin?',
-    en: 'You have many tasks at school and home. How do you manage?',
-    options: [
-      { tl: 'Ayusin ang oras — gawin ang una, huwag magmadali', en: 'Organize time — do first things first', best: true },
-      { tl: 'Hayaan na lang ang iba', en: 'Just let others do them' },
-      { tl: 'Gawin lahat nang sabay-sabay', en: 'Do everything at once' },
-      { tl: 'Iiyak na lang', en: 'Just cry' }
-    ],
-    feedbackTL: 'Ang tamang paggamit ng oras ay susi sa kapayapaan ng isip.',
-    feedbackEN: 'Proper time use is the key to peace of mind.'
-  },
-  { type: 'matching',
-    tl: 'Itugma ang Mabuting Ugali sa Bunga Nito',
-    en: 'Match Good Habit to Its Fruit',
-    pairs: [
-      { a: 'Katapatan', b: 'Tiwala ng iba' },
-      { a: 'Pagtulong', b: 'Pagmamahal ng kapwa' },
-      { a: 'Pagsisikap', b: 'Tagumpay balang araw' },
-      { a: 'Paggalang', b: 'Kapayapaan sa lahat' }
+        {
+            type: 'choice',
+            tl: 'Ano ang pinakamahalagang yaman ng isang tao?',
+            en: 'What is a person\'s most important treasure?',
+            options: [
+                { tl: 'Mabuting pag-uugali', en: 'Good character', correct: true },
+                { tl: 'Maraming pera', en: 'Lots of money' },
+                { tl: 'Magandang damit', en: 'Nice clothes' },
+                { tl: 'Malaking bahay', en: 'Big house' }
+            ],
+            feedbackCorrectTL: 'Tumpak! Ang pag-uugali ang kasama mo habambuhay — hindi ito nabibili.',
+            feedbackCorrectEN: 'Perfect! Character stays with you forever — it cannot be bought.',
+            feedbackWrongTL: 'Hindi. Ang lahat ng bagay ay nawawala, ngunit ang pag-uugali ay nananatili.',
+            feedbackWrongEN: 'Not quite. Things fade away, but character remains.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang gagawin kapag nakagawa ka ng mali?',
+            en: 'What do you do when you have done something wrong?',
+            options: [
+                { tl: 'Aminin at humingi ng tawad', en: 'Admit it and ask for forgiveness', correct: true },
+                { tl: 'Itago ang ginawa', en: 'Hide what you did' },
+                { tl: 'Isisi sa iba', en: 'Blame others' },
+                { tl: 'Umalis na lang', en: 'Just walk away' }
+            ],
+            feedbackCorrectTL: 'Mahusay! Ang pag-amin ay tanda ng katapangan at paglaki.',
+            feedbackCorrectEN: 'Great! Admitting shows courage and maturity.',
+            feedbackWrongTL: 'Hindi. Ang pagtatago ay nagpapabigat sa loob — aminin mo.',
+            feedbackWrongEN: 'Not quite. Hiding weighs heavy — admit it.'
+        },
+        {
+            type: 'choice',
+            tl: 'Paano magiging mabuting kaibigan?',
+            en: 'How do you become a good friend?',
+            options: [
+                { tl: 'Makinig, tumulong, at maging tapat', en: 'Listen, help, and be true', correct: true },
+                { tl: 'Magbigay ng regalo palagi', en: 'Always give gifts' },
+                { tl: 'Sang-ayon sa lahat ng gusto', en: 'Agree with everything' },
+                { tl: 'Maging mayaman', en: 'Be rich' }
+            ],
+            feedbackCorrectTL: 'Tama! Ang tunay na kaibigan ay nariyan sa hirap at ginhawa.',
+            feedbackCorrectEN: 'Correct! A true friend is there in hard times and good.',
+            feedbackWrongTL: 'Hindi. Ang pagmamahal at pagtanggap ang pinakamahalaga.',
+            feedbackWrongEN: 'Not quite. Love and acceptance matter most.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang ibig sabihin ng paggalang sa nakatatanda?',
+            en: 'What does respecting elders mean?',
+            options: [
+                { tl: 'Sumunod, gumamit ng magagalang na salita, at tumulong', en: 'Obey, use polite words, and help', correct: true },
+                { tl: 'Matakot sa kanila', en: 'Be afraid of them' },
+                { tl: 'Gawin lang kapag nakatingin sila', en: 'Only do it when they watch' },
+                { tl: 'Bigyan sila ng regalo', en: 'Give them gifts' }
+            ],
+            feedbackCorrectTL: 'Tumpak! Ang paggalang ay pagpapakita ng pagmamahal sa nagpalaki sa atin.',
+            feedbackCorrectEN: 'Perfect! Respect shows love for those who raised us.',
+            feedbackWrongTL: 'Hindi. Ang paggalang ay kusang-loob — hindi sapilitan.',
+            feedbackWrongEN: 'Not quite. Respect is freely given — not forced.'
+        },
+        {
+            type: 'choice',
+            tl: 'Ano ang gagawin kapag mayroon kang labis?',
+            en: 'What do you do when you have more than enough?',
+            options: [
+                { tl: 'Magbahagi sa nangangailangan', en: 'Share with those in need', correct: true },
+                { tl: 'Itago lahat', en: 'Keep everything' },
+                { tl: 'Ipagmalaki sa iba', en: 'Show off to others' },
+                { tl: 'Itapon ang labis', en: 'Throw away the excess' }
+            ],
+            feedbackCorrectTL: 'Mahusay! Ang pagbabahagi ay nagpapasaya sa nagbibigay at tumatanggap.',
+            feedbackCorrectEN: 'Great! Sharing makes happy both the giver and receiver.',
+            feedbackWrongTL: 'Hindi. Ang labis sa iyo ay kailangan ng iba.',
+            feedbackWrongEN: 'Not quite. What is extra to you is needed by someone else.'
+        }
     ]
-  },
-  { type: 'sequence',
-    tl: 'Ayusin ang paghahanda sa magandang kinabukasan',
-    en: 'Arrange steps to a bright future',
-    items: [
-      { order: 1, tl: 'Matuto nang mabuti', en: 'Learn well' },
-      { order: 2, tl: 'Tumulong sa tahanan', en: 'Help at home' },
-      { order: 3, tl: 'Magkaroon ng mabuting kaibigan', en: 'Make good friends' },
-      { order: 4, tl: 'Maging mabuting tao', en: 'Become a good person' }
-    ]
-  },
-  { type: 'truefalse',
-    tl: 'Ang pagiging mabuting tao ay mas mahalaga kaysa sa pagiging mayaman.',
-    en: 'Being a good person is more important than being rich.',
-    answer: true,
-    feedbackTL: 'TAMA! Ang kabutihan ay walang katapusang kayamanan.',
-    feedbackEN: 'TRUE! Goodness is an endless treasure.'
-  },
-  { type: 'truefalse',
-    tl: 'Ang pagkakamali ay tanda ng kabiguan.',
-    en: 'Making mistakes means you are a failure.',
-    answer: false,
-    feedbackTL: 'MALI! Ang pagkakamali ay pagkatuto — hindi kabiguan.',
-    feedbackEN: 'FALSE! Mistakes are lessons — not failures.'
-  },
-  { type: 'puzzle',
-    tl: 'Buuin ang salita: T-A-P-A-T-A-N',
-    en: 'Arrange the letters: T-A-P-A-T-A-N',
-    answerTL: 'TAPATAN',
-    answerEN: 'HONESTY',
-    hintTL: 'Ito ang pagsasabi ng totoo kahit walang nakatingin.',
-    hintEN: 'Telling the truth even when no one is watching.'
-  },
-  { type: 'puzzle',
-    tl: 'Buuin ang salita: P-A-G-M-A-M-A-H-A-L',
-    en: 'Arrange the letters: P-A-G-M-A-M-A-H-A-L',
-    answerTL: 'PAGMAMAHAL',
-    answerEN: 'LOVE',
-    hintTL: 'Ito ang pagtulong, pag-unawa, at pagtanggap sa kapwa.',
-    hintEN: 'Helping, understanding, and accepting others.'
-  },
-  { type: 'choice',
-    tl: 'Sino ang may pananagutan sa iyong kinabukasan?',
-    en: 'Who is responsible for your future?',
-    options: [
-      { tl: 'Ikaw mismo', en: 'You yourself', correct: true },
-      { tl: 'Magulang mo', en: 'Your parents' },
-      { tl: 'Guro mo', en: 'Your teacher' },
-      { tl: 'Kaibigan mo', en: 'Your friends' }
-    ],
-    feedbackCorrectTL: 'Tumpak! Ikaw ang may hawak sa iyong bukas — piliin mo ang mabuti.',
-    feedbackCorrectEN: 'Perfect! You hold your own tomorrow — choose what is good.',
-    feedbackWrongTL: 'Hindi. Ang iba ay makakatulong, ngunit ikaw ang gagawa ng landas.',
-    feedbackWrongEN: 'Not quite. Others help, but you build your own path.'
-  },
-  { type: 'choice',
-    tl: 'Ano ang pinakamagandang regalo na maibibigay mo sa iyong pamilya?',
-    en: 'What is the best gift you can give your family?',
-    options: [
-      { tl: 'Mabuting pag-uugali at pagtulong', en: 'Good character and help', correct: true },
-      { tl: 'Mahal na regalo', en: 'Expensive presents' },
-      { tl: 'Magandang damit', en: 'Nice clothes' },
-      { tl: 'Mataas na marka lang', en: 'High grades only' }
-    ],
-    feedbackCorrectTL: 'Mahusay! Ang pagmamahal sa gawa ay higit sa anumang materyal na bagay.',
-    feedbackCorrectEN: 'Excellent! Love shown in deeds is worth more than anything material.',
-    feedbackWrongTL: 'Hindi. Ang pagtulong at paggalang ay walang katumbas na halaga.',
-    feedbackWrongEN: 'Not quite. Help and respect have no equal price.'
-  }
-]
+};
 
 // ========== APP STATE ==========
 let currentCategory = null;
@@ -1367,7 +570,7 @@ let currentQuestionIndex = 0;
 let stars = parseInt(localStorage.getItem('dgStars') || '0');
 let answered = false;
 
-// Check connection status
+// Connection status
 function updateConnectionStatus() {
     const statusEl = document.getElementById('connStatus');
     if (navigator.onLine) {
@@ -1379,6 +582,7 @@ function updateConnectionStatus() {
 
 // ========== GAME FUNCTIONS ==========
 function startGame(category) {
+    initAudio(); // Initialize audio on first user interaction
     currentCategory = category;
     currentQuestionIndex = 0;
     answered = false;
@@ -1393,10 +597,11 @@ function startGame(category) {
 function loadQuestion() {
     answered = false;
     const qs = questionSets[currentCategory];
+    
     if (currentQuestionIndex >= qs.length) {
-        // All questions done
+        // All questions completed
         document.getElementById('optionsContainer').innerHTML = `
-            <div style="text-align:center; padding:20px;">
+            <div class="completion">
                 <h2>🎉 Tapos na! | Completed!</h2>
                 <p class="tagalog">Mahusay na pagtatrabaho!</p>
                 <p class="english">Great work!</p>
@@ -1416,7 +621,8 @@ function loadQuestion() {
     let html = '';
     q.options.forEach((opt, idx) => {
         html += `
-            <button class="option-btn" id="opt-${idx}" onclick="checkAnswer(${idx}, ${opt.correct ? true : false})">
+            <button class="option-btn" id="opt-${idx}" 
+                    onclick="checkAnswer(${idx}, ${!!opt.correct})">
                 <span class="tagalog">${String.fromCharCode(65+idx)}. ${opt.tl}</span><br>
                 <span class="english">${opt.en}</span>
             </button>
@@ -1434,8 +640,11 @@ function checkAnswer(index, isCorrect) {
     const feedbackTL = document.getElementById('feedbackTL');
     const feedbackEN = document.getElementById('feedbackEN');
     
-    // Highlight buttons
-    document.querySelectorAll('.option-btn').forEach(btn => btn.style.pointerEvents = 'none');
+    // Disable all buttons
+    document.querySelectorAll('.option-btn').forEach(btn => {
+        btn.disabled = true;
+        btn.style.pointerEvents = 'none';
+    });
     
     if (isCorrect) {
         playCorrectSound();
@@ -1452,9 +661,11 @@ function checkAnswer(index, isCorrect) {
         feedbackTL.textContent = q.feedbackWrongTL;
         feedbackEN.textContent = q.feedbackWrongEN;
         feedbackBox.className = 'feedback wrong';
-        // Show correct answer
+        // Highlight correct answer
         q.options.forEach((opt, i) => {
-            if (opt.correct) document.getElementById(`opt-${i}`).classList.add('correct');
+            if (opt.correct) {
+                document.getElementById(`opt-${i}`).classList.add('correct');
+            }
         });
     }
     
@@ -1476,6 +687,7 @@ function goBack() {
 updateConnectionStatus();
 window.addEventListener('online', updateConnectionStatus);
 window.addEventListener('offline', updateConnectionStatus);
+document.getElementById('starCount').textContent = stars;
 </script>
 </body>
 </html>
